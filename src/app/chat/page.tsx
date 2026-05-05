@@ -1,4 +1,3 @@
-// src/app/chat/page.tsx
 "use client";
 
 import ProtectedRoute from "@/src/auth/ProtectedRoute";
@@ -21,101 +20,12 @@ import {
 import { decryptIncomingMessage } from "@/src/services/messageService";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import ThemeToggle from "@/src/components/ThemeToggle";
 
-const isUUID = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
-
-/* ── Icons ─────────────────────────────── */
-function HamburgerIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-    >
-      <line x1="3" y1="6" x2="21" y2="6" />
-      <line x1="3" y1="12" x2="21" y2="12" />
-      <line x1="3" y1="18" x2="21" y2="18" />
-    </svg>
+const isUUID = (id: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    id,
   );
-}
 
-function CloseIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-    >
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  );
-}
-
-function SendIcon() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="22" y1="2" x2="11" y2="13" />
-      <polygon points="22 2 15 22 11 13 2 9 22 2" />
-    </svg>
-  );
-}
-
-function LogoutIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-    >
-      <circle cx="11" cy="11" r="8" />
-      <path d="M21 21l-4.35-4.35" />
-    </svg>
-  );
-}
-
-/* ── Component ─────────────────────────── */
 export default function ChatPage() {
   const router = useRouter();
   const currentUser = getUser();
@@ -127,6 +37,7 @@ export default function ChatPage() {
   } = useConversations();
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
   const [activeUserName, setActiveUserName] = useState<string>("");
+  const activeUserIdRef = useRef<string | null>(null);
 
   const {
     messages,
@@ -136,36 +47,22 @@ export default function ChatPage() {
   const [localMessages, setLocalMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const { results: searchResults } = useUserSearch(searchQuery);
+  const [showSearch, setShowSearch] = useState(false);
+  const { results: searchResults, loading: searchLoading } =
+    useUserSearch(searchQuery);
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  /* Scroll to bottom on new messages */
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, localMessages]);
-
-  /* Lock body scroll when mobile sidebar is open */
-  useEffect(() => {
-    if (sidebarOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [sidebarOpen]);
-
-  /* Messages merge */
-  const seen = new Set();
+  // Deduplicated, sorted message list
+  const seenIds = new Set<string>();
   const allMessages = [...messages, ...localMessages]
     .filter((m) => {
-      if (seen.has(m.id)) return false;
-      seen.add(m.id);
+      if (seenIds.has(m.id)) return false;
+      seenIds.add(m.id);
       return true;
     })
     .sort(
@@ -173,279 +70,469 @@ export default function ChatPage() {
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
 
-  /* SELECT */
-  const selectConversation = (id: string, name: string) => {
-    setActiveUserId(id);
-    setActiveUserName(name);
-    setSidebarOpen(false);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [allMessages.length]);
+
+  useEffect(() => {
+    activeUserIdRef.current = activeUserId;
+  }, [activeUserId]);
+
+  /* ── WebSocket ─────────────────────────────────────────────── */
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+
+    const ws = new WebSocket(`wss://whisperbox.koyeb.app/ws?token=${token}`);
+    wsRef.current = ws;
+
+    ws.onopen = () => console.log("[WS] connected");
+    ws.onclose = () => console.log("[WS] disconnected");
+    ws.onerror = (e) => console.error("[WS] error", e);
+
+    ws.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.event !== "message.receive") return;
+
+        const msg = data;
+        const partnerId =
+          msg.from_user_id === currentUser?.id
+            ? msg.to_user_id
+            : msg.from_user_id;
+
+        // Only inject into UI if this conversation is currently open
+        if (partnerId !== activeUserIdRef.current) {
+          refreshConversations();
+          return;
+        }
+
+        let decrypted = { ...msg, text: "[Encrypted]" };
+
+        if (hasPrivateKey() && msg.payload?.ciphertext) {
+          try {
+            const privateKey = await getPrivateKey();
+            const isSender = msg.from_user_id === currentUser?.id;
+            const keyToUse = isSender
+              ? msg.payload.encryptedKeyForSelf
+              : msg.payload.encryptedKey;
+            decrypted = await decryptIncomingMessage({
+              message: {
+                ...msg,
+                payload: { ...msg.payload, encryptedKey: keyToUse },
+              },
+              privateKey,
+            });
+          } catch (e) {
+            console.warn("[WS] Decryption failed:", e);
+          }
+        }
+
+        setMessages((prev: any[]) => {
+          if (prev.some((m) => m.id === decrypted.id)) return prev;
+          return [...prev, decrypted];
+        });
+        refreshConversations();
+      } catch (e) {
+        console.error("[WS] Parse error:", e);
+      }
+    };
+
+    return () => ws.close();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Conversation selection ─────────────────────────────────── */
+  const selectConversation = (userId: string, displayName: string) => {
+    setActiveUserId(userId);
+    setActiveUserName(displayName);
+    setLocalMessages([]);
+    setSendError(null);
+    setShowSearch(false);
+    setSearchQuery("");
   };
 
-  /* LOGOUT */
+  /* ── Logout ─────────────────────────────────────────────────── */
   const handleLogout = async () => {
-    clearSession();
-    router.push("/login");
+    try {
+      const refreshToken = sessionStorage.getItem("refresh_token");
+      if (refreshToken) {
+        await apiFetch("/auth/logout", {
+          method: "POST",
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+      }
+    } catch {
+      /* best-effort */
+    } finally {
+      wsRef.current?.close();
+      clearSession();
+      router.push("/login");
+    }
   };
 
-  /* SEND (unchanged logic) */
+  /* ── Send message ────────────────────────────────────────────── */
   const sendMessage = async () => {
     if (!input.trim() || sending) return;
-    setSending(true);
+    setSendError(null);
 
-    const tempId = Date.now().toString();
+    if (!activeUserId || !isUUID(activeUserId)) {
+      setSendError("Invalid recipient.");
+      return;
+    }
+    if (activeUserId === currentUser?.id) {
+      setSendError("You can't message yourself.");
+      return;
+    }
+
+    const token = getToken();
+    if (!token) {
+      setSendError("Not logged in.");
+      return;
+    }
+
+    const tempId = `temp-${Date.now()}`;
+    const messageText = input;
+
     setLocalMessages((prev) => [
       ...prev,
       {
         id: tempId,
-        text: input,
-        from_user_id: currentUser?.id,
+        text: messageText,
+        from_user_id: currentUser?.id, // ← critical for isOwn check
+        to_user_id: activeUserId,
         created_at: new Date().toISOString(),
         optimistic: true,
       },
     ]);
-
     setInput("");
-    setSending(false);
-  };
+    setSending(true);
 
-  const handleInputKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
+    try {
+      // Fetch recipient public key
+      const { public_key: recipientPubKeyB64 } = await apiFetch(
+        `/users/${activeUserId}/public-key`,
+      );
+      const recipientPublicKey = await crypto.subtle.importKey(
+        "spki",
+        Uint8Array.from(atob(recipientPubKeyB64), (c) => c.charCodeAt(0)),
+        { name: "RSA-OAEP", hash: "SHA-256" },
+        false,
+        ["encrypt"],
+      );
+
+      // Own public key (so we can decrypt sent messages)
+      const myPubKeyB64 = currentUser?.public_key;
+      if (!myPubKeyB64) throw new Error("Your public key is missing");
+      const myPublicKey = await crypto.subtle.importKey(
+        "spki",
+        Uint8Array.from(atob(myPubKeyB64), (c) => c.charCodeAt(0)),
+        { name: "RSA-OAEP", hash: "SHA-256" },
+        false,
+        ["encrypt"],
+      );
+
+      const aesKey = await generateMessageKey();
+      const { iv, data: ciphertext } = await encryptMessage(
+        messageText,
+        aesKey,
+      );
+      const encryptedKey = await encryptMessageKey(aesKey, recipientPublicKey);
+      const encryptedKeyForSelf = await encryptMessageKey(aesKey, myPublicKey);
+      const payload = { ciphertext, iv, encryptedKey, encryptedKeyForSelf };
+
+      // Prefer WebSocket; fall back to REST
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({ event: "message.send", to: activeUserId, payload }),
+        );
+        // Confirm optimistic message immediately (WS send has no response)
+        setLocalMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, optimistic: false } : m)),
+        );
+      } else {
+        const res = await fetch("/api/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ to: activeUserId, payload }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.raw || errData.error || "Send failed");
+        }
+        const saved = await res.json();
+        setLocalMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempId
+              ? {
+                  ...saved,
+                  text: messageText,
+                  from_user_id: currentUser?.id,
+                  optimistic: false,
+                }
+              : m,
+          ),
+        );
+      }
+
+      refreshConversations();
+    } catch (err: any) {
+      setSendError(err.message || "Failed to send message");
+      setLocalMessages((prev) => prev.filter((m) => m.id !== tempId));
+    } finally {
+      setSending(false);
     }
   };
 
-  /* Avatar helper */
-  const getInitial = (name: string) => name?.[0]?.toUpperCase() ?? "?";
+  const fmt = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  };
 
+  /* ── UI ─────────────────────────────────────────────────────── */
   return (
     <ProtectedRoute>
-      <div className="h-screen flex bg-white dark:bg-[#0f1117] text-black dark:text-white overflow-hidden transition-colors duration-200">
-        {/* ── MOBILE OVERLAY ─────────────────── */}
-        {sidebarOpen && (
-          <div
-            onClick={() => setSidebarOpen(false)}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden"
-            aria-hidden="true"
-          />
-        )}
-
-        {/* ── SIDEBAR ────────────────────────── */}
-        <aside
-          className={`
-          fixed md:static z-40
-          flex flex-col
-          w-72 h-full
-          bg-gray-50 dark:bg-[#141920]
-          border-r border-gray-200 dark:border-white/10
-          transition-transform duration-300 ease-in-out
-          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
-          md:translate-x-0
-        `}
-        >
-          {/* Sidebar Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-white/10 shrink-0">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
+      <div className="h-screen flex bg-[#0f1117] text-white font-sans antialiased">
+        {/* ── Sidebar ─────────────────────────────────────────── */}
+        <div className="w-72 shrink-0 border-r border-white/10 flex flex-col bg-[#141920]">
+          {/* Header */}
+          <div className="px-4 pt-5 pb-3 border-b border-white/10">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                  <svg
+                    width="16"
+                    height="16"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    className="text-indigo-400"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                    />
+                  </svg>
+                </div>
+                <span className="font-semibold text-sm text-white/90">
+                  WhisperBox
+                </span>
+              </div>
+              <button
+                onClick={handleLogout}
+                title="Log out"
+                className="w-7 h-7 rounded-md flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/10 transition"
+              >
                 <svg
-                  width="14"
-                  height="14"
+                  width="15"
+                  height="15"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
-                  className="text-indigo-500 dark:text-indigo-400"
                 >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                    strokeWidth={2}
+                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
                   />
                 </svg>
-              </div>
-              <span className="font-semibold text-sm">WhisperBox</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <ThemeToggle />
-              {/* Close button — mobile only */}
-              <button
-                className="md:hidden p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-white/10 transition"
-                onClick={() => setSidebarOpen(false)}
-                aria-label="Close sidebar"
-              >
-                <CloseIcon />
               </button>
             </div>
-          </div>
 
-          {/* Search */}
-          <div className="px-3 py-3 shrink-0">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-white/30">
-                <SearchIcon />
-              </span>
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search users…"
-                className="w-full pl-8 pr-3 py-2 rounded-lg bg-gray-200 dark:bg-white/5 border border-gray-300 dark:border-white/10 text-sm placeholder-gray-400 dark:placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition"
-              />
-            </div>
-          </div>
-
-          {/* Conversation List */}
-          <div className="flex-1 overflow-y-auto py-1">
-            {/* Search results */}
-            {searchQuery &&
-              searchResults.map((u: any) => (
-                <button
-                  key={u.id}
-                  onClick={() => selectConversation(u.id, u.display_name)}
-                  className={`
-                  w-full text-left flex items-center gap-3 px-3 py-2.5 transition
-                  ${
-                    activeUserId === u.id
-                      ? "bg-indigo-50 dark:bg-indigo-500/10 border-r-2 border-indigo-500"
-                      : "hover:bg-gray-100 dark:hover:bg-white/5"
-                  }
-                `}
-                >
-                  <div className="w-9 h-9 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
-                    <span className="text-indigo-500 dark:text-indigo-400 text-sm font-medium">
-                      {getInitial(u.display_name)}
-                    </span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {u.display_name}
-                    </p>
-                    <p className="text-xs text-gray-400 dark:text-white/30 truncate">
-                      @{u.username}
-                    </p>
-                  </div>
-                </button>
-              ))}
-
-            {/* Existing conversations */}
-            {!searchQuery &&
-              conversations?.map((c: any) => {
-                const otherId = c.participant_ids?.find(
-                  (id: string) => id !== currentUser?.id,
-                );
-                const otherName = c.participant_names?.[otherId] ?? "Unknown";
-                return (
-                  <button
-                    key={c.id}
-                    onClick={() => selectConversation(otherId, otherName)}
-                    className={`
-                    w-full text-left flex items-center gap-3 px-3 py-2.5 transition
-                    ${
-                      activeUserId === otherId
-                        ? "bg-indigo-50 dark:bg-indigo-500/10 border-r-2 border-indigo-500"
-                        : "hover:bg-gray-100 dark:hover:bg-white/5"
-                    }
-                  `}
-                  >
-                    <div className="w-9 h-9 rounded-full bg-gray-300 dark:bg-white/10 flex items-center justify-center shrink-0">
-                      <span className="text-sm font-medium text-gray-600 dark:text-white/60">
-                        {getInitial(otherName)}
-                      </span>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {otherName}
-                      </p>
-                      <p className="text-xs text-gray-400 dark:text-white/30 truncate">
-                        {c.last_message ?? "No messages yet"}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-
-            {!searchQuery &&
-              !convLoading &&
-              (!conversations || conversations.length === 0) && (
-                <p className="text-xs text-gray-400 dark:text-white/30 text-center py-8 px-4">
-                  Search for a user above to start chatting
-                </p>
-              )}
-          </div>
-
-          {/* Sidebar Footer — user info + logout */}
-          <div className="shrink-0 border-t border-gray-200 dark:border-white/10 px-3 py-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
-                <span className="text-indigo-500 dark:text-indigo-400 text-xs font-medium">
-                  {getInitial(
-                    currentUser?.display_name ?? currentUser?.username ?? "?",
-                  )}
-                </span>
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium truncate">
-                  {currentUser?.display_name ?? currentUser?.username}
-                </p>
-                <p className="text-xs text-gray-400 dark:text-white/30 truncate">
-                  @{currentUser?.username}
-                </p>
-              </div>
-              <button
-                onClick={handleLogout}
-                aria-label="Logout"
-                className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition"
-              >
-                <LogoutIcon />
-              </button>
-            </div>
-          </div>
-        </aside>
-
-        {/* ── MAIN AREA ──────────────────────── */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Chat Header */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-white/10 shrink-0 bg-white dark:bg-[#0f1117]">
-            {/* Hamburger — mobile only */}
-            <button
-              className="md:hidden p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 transition"
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open sidebar"
-            >
-              <HamburgerIcon />
-            </button>
-
-            {activeUserId ? (
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-white/10 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-medium text-gray-600 dark:text-white/60">
-                    {getInitial(activeUserName)}
-                  </span>
+            {/* Current user */}
+            {currentUser && (
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5">
+                <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold shrink-0">
+                  {currentUser.display_name?.[0]?.toUpperCase()}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate">
-                    {activeUserName}
+                  <p className="text-xs font-medium text-white/90 truncate">
+                    {currentUser.display_name}
+                  </p>
+                  <p className="text-[10px] text-white/40 truncate">
+                    @{currentUser.username}
                   </p>
                 </div>
+                <div className="ml-auto w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
               </div>
-            ) : (
-              <p className="text-sm text-gray-400 dark:text-white/40 font-medium">
-                Select a conversation
-              </p>
             )}
-
-            {/* Theme toggle in header — visible on all sizes */}
-            <div className="ml-auto">
-              <ThemeToggle />
-            </div>
           </div>
 
-          {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+          {/* New conversation */}
+          <div className="px-4 py-3">
+            <button
+              onClick={() => {
+                setShowSearch(!showSearch);
+                setSearchQuery("");
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 transition text-sm font-medium"
+            >
+              <svg
+                width="14"
+                height="14"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              New Conversation
+            </button>
+
+            {showSearch && (
+              <div className="mt-2">
+                <input
+                  autoFocus
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search users..."
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                {searchLoading && (
+                  <p className="text-xs text-white/40 mt-2 px-1">
+                    Searching...
+                  </p>
+                )}
+                {searchResults.map((u: any) => (
+                  <div
+                    key={u.id}
+                    onClick={() => selectConversation(u.id, u.display_name)}
+                    className="flex items-center gap-2 px-2 py-2 mt-1 rounded-lg hover:bg-white/10 cursor-pointer transition"
+                  >
+                    <div className="w-7 h-7 rounded-full bg-violet-500/30 flex items-center justify-center text-xs font-bold text-violet-300">
+                      {u.display_name?.[0]?.toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">{u.display_name}</p>
+                      <p className="text-[10px] text-white/40">@{u.username}</p>
+                    </div>
+                  </div>
+                ))}
+                {!searchLoading &&
+                  searchQuery.length >= 1 &&
+                  searchResults.length === 0 && (
+                    <p className="text-xs text-white/30 px-1 mt-2">
+                      No users found
+                    </p>
+                  )}
+              </div>
+            )}
+          </div>
+
+          {/* Conversation list */}
+          <div className="flex-1 overflow-y-auto px-2 pb-2">
+            <p className="text-[10px] uppercase tracking-widest text-white/30 px-2 mb-2">
+              Messages
+            </p>
+            {convLoading && (
+              <div className="space-y-2 px-2">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="h-12 rounded-lg bg-white/5 animate-pulse"
+                  />
+                ))}
+              </div>
+            )}
+            {!convLoading && conversations.length === 0 && (
+              <p className="text-xs text-white/30 px-2">
+                No conversations yet. Search above to start one.
+              </p>
+            )}
+            {conversations.map((c: any) => {
+              const isActive = activeUserId === c.user_id;
+              return (
+                <div
+                  key={c.user_id}
+                  onClick={() => selectConversation(c.user_id, c.display_name)}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer mb-1 transition ${isActive ? "bg-indigo-500/20 text-white" : "hover:bg-white/5 text-white/70"}`}
+                >
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${isActive ? "bg-indigo-500" : "bg-white/10"}`}
+                  >
+                    {c.display_name?.[0]?.toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p
+                      className={`text-sm font-medium truncate ${isActive ? "text-white" : "text-white/80"}`}
+                    >
+                      {c.display_name}
+                    </p>
+                    <p className="text-[10px] text-white/30 truncate">
+                      @{c.username}
+                    </p>
+                  </div>
+                  {isActive && (
+                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Chat area ───────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Chat header */}
+          <div className="px-6 py-4 border-b border-white/10 flex items-center gap-3 bg-[#141920]">
+            {activeUserId ? (
+              <>
+                <div className="w-9 h-9 rounded-full bg-indigo-500/30 flex items-center justify-center font-bold text-indigo-300">
+                  {activeUserName?.[0]?.toUpperCase()}
+                </div>
+                <div>
+                  <p className="font-semibold text-sm">{activeUserName}</p>
+                  <div className="flex items-center gap-1.5">
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      className="text-emerald-400"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                      />
+                    </svg>
+                    <span className="text-[10px] text-emerald-400 font-medium">
+                      End-to-end encrypted
+                    </span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="text-white/40 text-sm">Select a conversation</p>
+            )}
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-[#0f1117]">
             {!activeUserId && (
               <div className="h-full flex flex-col items-center justify-center text-center">
-                <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mb-4">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-4">
                   <svg
-                    width="24"
-                    height="24"
+                    width="28"
+                    height="28"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -459,50 +546,49 @@ export default function ChatPage() {
                     />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-gray-600 dark:text-white/60">
-                  Your messages are end-to-end encrypted
+                <p className="text-white/60 text-sm font-medium">
+                  No conversation selected
                 </p>
-                <p className="text-xs text-gray-400 dark:text-white/30 mt-1">
-                  Select a conversation or search for a user to get started
+                <p className="text-white/30 text-xs mt-1">
+                  Choose one from the sidebar or start a new one
                 </p>
               </div>
             )}
 
             {msgLoading && activeUserId && (
-              <div className="flex justify-center pt-8">
-                <svg
-                  className="animate-spin text-gray-400"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M21 12a9 9 0 11-6.219-8.56" />
-                </svg>
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"}`}
+                  >
+                    <div className="h-10 w-48 rounded-2xl bg-white/5 animate-pulse" />
+                  </div>
+                ))}
               </div>
             )}
 
-            {allMessages.map((m: any) => {
-              const isOwn = m.from_user_id === currentUser?.id;
+            {allMessages.map((msg: any) => {
+              const isOwn = msg.from_user_id === currentUser?.id;
               return (
                 <div
-                  key={m.id}
+                  key={msg.id}
                   className={`flex ${isOwn ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`
-                    px-3.5 py-2 rounded-2xl max-w-[75%] sm:max-w-xs text-sm leading-relaxed
-                    ${
+                    className={`max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl ${
                       isOwn
-                        ? "bg-indigo-600 text-white rounded-br-sm"
-                        : "bg-gray-100 dark:bg-white/10 text-black dark:text-white rounded-bl-sm"
-                    }
-                    ${m.optimistic ? "opacity-70" : ""}
-                  `}
+                        ? `bg-indigo-600 text-white ${msg.optimistic ? "opacity-60" : ""}`
+                        : "bg-white/10 text-white/90"
+                    } ${isOwn ? "rounded-br-sm" : "rounded-bl-sm"}`}
                   >
-                    {m.text}
+                    <p className="text-sm leading-relaxed">{msg.text}</p>
+                    <p
+                      className={`text-[10px] mt-1 ${isOwn ? "text-indigo-200/70" : "text-white/30"} text-right`}
+                    >
+                      {fmt(msg.created_at)}
+                      {msg.optimistic && " · sending..."}
+                    </p>
                   </div>
                 </div>
               );
@@ -510,24 +596,65 @@ export default function ChatPage() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Message Input */}
+          {/* Input */}
           {activeUserId && (
-            <div className="shrink-0 px-3 py-3 border-t border-gray-200 dark:border-white/10 bg-white dark:bg-[#0f1117]">
-              <div className="flex items-center gap-2">
-                <input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleInputKeyDown}
-                  placeholder="Type a message…"
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm placeholder-gray-400 dark:placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition min-w-0"
-                />
+            <div className="px-6 py-4 border-t border-white/10 bg-[#141920]">
+              {sendError && (
+                <p className="text-red-400 text-xs mb-2">{sendError}</p>
+              )}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 flex items-center bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 gap-2 focus-within:border-indigo-500/50 transition">
+                  <svg
+                    width="14"
+                    height="14"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    className="text-white/20 shrink-0"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 15v2m-6 4h12a2 2 0 00-2-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                    />
+                  </svg>
+                  <input
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    placeholder="Type an encrypted message..."
+                    className="flex-1 bg-transparent text-sm text-white placeholder-white/20 focus:outline-none"
+                  />
+                </div>
                 <button
                   onClick={sendMessage}
-                  disabled={!input.trim() || sending}
-                  aria-label="Send message"
-                  className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition shrink-0"
+                  disabled={sending || !input.trim()}
+                  className="w-10 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center shrink-0"
                 >
-                  <SendIcon />
+                  {sending ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <svg
+                      width="16"
+                      height="16"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                      />
+                    </svg>
+                  )}
                 </button>
               </div>
             </div>
