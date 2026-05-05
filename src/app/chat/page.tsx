@@ -51,20 +51,13 @@ export default function ChatPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
-
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const { results: searchResults, loading: searchLoading } =
     useUserSearch(searchQuery);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
-
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
-  };
-
+  // Deduplicated, sorted message list
   const seenIds = new Set<string>();
   const allMessages = [...messages, ...localMessages]
     .filter((m) => {
@@ -84,10 +77,6 @@ export default function ChatPage() {
   useEffect(() => {
     activeUserIdRef.current = activeUserId;
   }, [activeUserId]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-  }, [theme]);
 
   /* ── WebSocket ─────────────────────────────────────────────── */
   useEffect(() => {
@@ -160,8 +149,6 @@ export default function ChatPage() {
     setSendError(null);
     setShowSearch(false);
     setSearchQuery("");
-
-    setSidebarOpen(false);
   };
 
   /* ── Logout ─────────────────────────────────────────────────── */
@@ -313,57 +300,11 @@ export default function ChatPage() {
   /* ── UI ─────────────────────────────────────────────────────── */
   return (
     <ProtectedRoute>
-      <div className="h-screen flex bg-white dark:bg-[#0f1117] text-black dark:text-white font-sans antialiased">
+      <div className="h-screen flex bg-[#0f1117] text-white font-sans antialiased">
         {/* ── Sidebar ─────────────────────────────────────────── */}
-        <div
-          className={`
-  fixed md:static z-40
-  w-[80%] max-w-xs h-full
-  bg-white dark:bg-[#141920]
-  border-r border-gray-200 dark:border-white/10
-  transform ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
-  md:translate-x-0 transition
-`}
-        >
+        <div className="w-72 shrink-0 border-r border-white/10 flex flex-col bg-[#141920]">
           {/* Header */}
-          <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-white/10">
-            <button
-              className="md:hidden text-xl"
-              onClick={() => setSidebarOpen((prev) => !prev)}
-            >
-              ☰
-            </button>
-
-            <h2 className="text-sm truncate">
-              {activeUserName || "Select chat"}
-            </h2>
-
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-lg bg-gray-200 dark:bg-white/10"
-            >
-              {theme === "dark" ? (
-                // Sun (filled)
-                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-yellow-400">
-                  <circle cx="12" cy="12" r="5" />
-                  <g stroke="currentColor" strokeWidth="2">
-                    <line x1="12" y1="1" x2="12" y2="4" />
-                    <line x1="12" y1="20" x2="12" y2="23" />
-                    <line x1="4.22" y1="4.22" x2="6.34" y2="6.34" />
-                    <line x1="17.66" y1="17.66" x2="19.78" y2="19.78" />
-                    <line x1="1" y1="12" x2="4" y2="12" />
-                    <line x1="20" y1="12" x2="23" y2="12" />
-                    <line x1="4.22" y1="19.78" x2="6.34" y2="17.66" />
-                    <line x1="17.66" y1="6.34" x2="19.78" y2="4.22" />
-                  </g>
-                </svg>
-              ) : (
-                // Moon (filled)
-                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-indigo-400">
-                  <path d="M21 12.79A9 9 0 1111.21 3c0 .34.02.67.05 1A7 7 0 0021 12.79z" />
-                </svg>
-              )}
-            </button>
+          <div className="px-4 pt-5 pb-3 border-b border-white/10">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">

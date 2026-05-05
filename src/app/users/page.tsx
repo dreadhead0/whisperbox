@@ -1,3 +1,5 @@
+// src/app/users/page.tsx
+
 "use client";
 
 import { useState } from "react";
@@ -26,27 +28,18 @@ export default function UsersPage() {
           onClick={toggleTheme}
           className="p-2 rounded-lg bg-gray-200 dark:bg-white/10"
         >
-          {theme === "dark" ? (
-            // Sun (filled)
-            <svg viewBox="0 0 24 24" className="w-5 h-5 fill-yellow-400">
-              <circle cx="12" cy="12" r="5" />
-              <g stroke="currentColor" strokeWidth="2">
-                <line x1="12" y1="1" x2="12" y2="4" />
-                <line x1="12" y1="20" x2="12" y2="23" />
-                <line x1="4.22" y1="4.22" x2="6.34" y2="6.34" />
-                <line x1="17.66" y1="17.66" x2="19.78" y2="19.78" />
-                <line x1="1" y1="12" x2="4" y2="12" />
-                <line x1="20" y1="12" x2="23" y2="12" />
-                <line x1="4.22" y1="19.78" x2="6.34" y2="17.66" />
-                <line x1="17.66" y1="6.34" x2="19.78" y2="4.22" />
-              </g>
-            </svg>
-          ) : (
-            // Moon (filled)
-            <svg viewBox="0 0 24 24" className="w-5 h-5 fill-indigo-400">
-              <path d="M21 12.79A9 9 0 1111.21 3c0 .34.02.67.05 1A7 7 0 0021 12.79z" />
-            </svg>
-          )}
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            fill="none"
+          >
+            <path
+              strokeWidth="2"
+              d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36 6.36l-1.42-1.42M7.05 7.05 5.64 5.64m12.72 0-1.42 1.41M7.05 16.95l-1.41 1.41"
+            />
+          </svg>
         </button>
       </div>
 
