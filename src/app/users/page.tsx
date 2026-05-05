@@ -6,16 +6,13 @@ import { fetchUserPublicKey } from "@/src/hooks/useUserPublicKey";
 
 export default function UsersPage() {
   const [query, setQuery] = useState("");
-  const { results, search, loading } = useUserSearch();
+  const { results, loading } = useUserSearch(query);
 
   const handleSelectUser = async (user: any) => {
     const publicKey = await fetchUserPublicKey(user.id);
 
-    // store for later encryption
     sessionStorage.setItem("recipient_public_key", publicKey);
     sessionStorage.setItem("chat_user", JSON.stringify(user));
-
-    alert(`Selected ${user.username}`);
   };
 
   return (
@@ -27,19 +24,9 @@ export default function UsersPage() {
         placeholder="Search username..."
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") search(query);
-        }}
       />
 
-      <button
-        onClick={() => search(query)}
-        className="mt-3 bg-indigo-600 px-4 py-2 rounded"
-      >
-        Search
-      </button>
-
-      {loading && <p className="mt-4">Loading...</p>}
+      {loading && <p className="mt-4 text-gray-400">Searching...</p>}
 
       <div className="mt-4 space-y-2">
         {results.map((u) => (
