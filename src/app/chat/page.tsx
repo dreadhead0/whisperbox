@@ -300,9 +300,14 @@ export default function ChatPage() {
   /* ── UI ─────────────────────────────────────────────────────── */
   return (
     <ProtectedRoute>
-      <div className="h-screen flex bg-[#0f1117] text-white font-sans antialiased">
+      <div className="h-screen flex flex-col md:flex-row bg-[#0f1117] text-white font-sans antialiased">
         {/* ── Sidebar ─────────────────────────────────────────── */}
-        <div className="w-72 shrink-0 border-r border-white/10 flex flex-col bg-[#141920]">
+        <div
+          className={`
+  ${activeUserId ? "hidden md:flex" : "flex"}
+  w-full md:w-72 shrink-0 border-r border-white/10 flex-col bg-[#141920]
+`}
+        >
           {/* Header */}
           <div className="px-4 pt-5 pb-3 border-b border-white/10">
             <div className="flex items-center justify-between mb-4">
@@ -488,7 +493,12 @@ export default function ChatPage() {
         </div>
 
         {/* ── Chat area ───────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div
+          className={`
+  flex-1 flex flex-col min-w-0
+  ${!activeUserId ? "hidden md:flex" : "flex"}
+`}
+        >
           {/* Chat header */}
           <div className="px-6 py-4 border-b border-white/10 flex items-center gap-3 bg-[#141920]">
             {activeUserId ? (
@@ -526,7 +536,7 @@ export default function ChatPage() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-[#0f1117]">
+          <div className="flex-1 overflow-y-auto p-3 md:p-6 space-y-3 bg-[#0f1117]">
             {!activeUserId && (
               <div className="h-full flex flex-col items-center justify-center text-center">
                 <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-4">
@@ -576,7 +586,7 @@ export default function ChatPage() {
                   className={`flex ${isOwn ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl ${
+                    className={`max-w-[85%] md:max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl ${
                       isOwn
                         ? `bg-indigo-600 text-white ${msg.optimistic ? "opacity-60" : ""}`
                         : "bg-white/10 text-white/90"
@@ -598,7 +608,7 @@ export default function ChatPage() {
 
           {/* Input */}
           {activeUserId && (
-            <div className="px-6 py-4 border-t border-white/10 bg-[#141920]">
+            <div className="px-3 md:px-6 py-3 md:py-4 border-t  border-white/10 bg-[#141920]">
               {sendError && (
                 <p className="text-red-400 text-xs mb-2">{sendError}</p>
               )}
