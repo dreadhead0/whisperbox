@@ -13,25 +13,30 @@ export function useMessages() {
     const run = async () => {
       try {
         const data = await fetchMessages();
-        const privateKey = getPrivateKey();
+
+        const privateKey = await getPrivateKey();
 
         const decrypted = await Promise.all(
           data.map(async (msg: any) => {
             try {
               return await decryptIncomingMessage({
                 message: msg,
-                privateKey,
+                privateKey, // now correct type
               });
             } catch (e) {
+              console.error("Decryption failed:", e);
+
               return {
                 ...msg,
                 text: "[Encrypted message]",
               };
             }
-          }),
+          })
         );
 
         setMessages(decrypted);
+      } catch (err) {
+        console.error("Message fetch error:", err);
       } finally {
         setLoading(false);
       }
