@@ -1,3 +1,4 @@
+// src/components/ThemeToggle.tsx
 "use client";
 
 import { useTheme } from "@/src/hooks/useTheme";
@@ -16,7 +17,7 @@ export default function ThemeToggle({ className = "" }: ThemeToggleProps) {
       className={`p-2 rounded-lg bg-gray-200 dark:bg-white/10 hover:bg-gray-300 dark:hover:bg-white/20 transition-colors ${className}`}
     >
       {theme === "dark" ? (
-        /* Sun icon — shown in dark mode to switch to light */
+        /* Sun — click to go light */
         <svg
           width="18"
           height="18"
@@ -38,7 +39,7 @@ export default function ThemeToggle({ className = "" }: ThemeToggleProps) {
           <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
         </svg>
       ) : (
-        /* Moon icon — shown in light mode to switch to dark */
+        /* Moon — click to go dark */
         <svg
           width="18"
           height="18"
